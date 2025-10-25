@@ -1,0 +1,15 @@
+# IDE
+.vscode/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.Python
+
+# YOLO
+photos/
+runs/
+yolo11n.pt
+*.pt
