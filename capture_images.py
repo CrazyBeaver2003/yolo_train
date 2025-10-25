@@ -6,6 +6,7 @@ from cv_bridge import CvBridge
 import os
 from datetime import datetime
 import yaml
+import re
 
 class ImageCapture(Node):
     def __init__(self):
@@ -22,8 +23,14 @@ class ImageCapture(Node):
         self.class_id_map = {}
         self.next_class_id = 0
         self.in_roi_mode = False
+        
+        self.dataset_number = None
+        self.dataset_dir = None
 
-        self.photo_dir = os.path.join(os.getcwd(), 'photos')
+        # Выбираем или создаем датасет
+        self.choose_or_create_dataset()
+        
+        self.photo_dir = self.dataset_dir
         self.images_dir = os.path.join(self.photo_dir, 'images')
         self.labels_dir = os.path.join(self.photo_dir, 'labels')
         
@@ -54,10 +61,93 @@ class ImageCapture(Node):
 ║ C           - Изменить класс объекта           ║
 ║ Q           - Выход из программы               ║
 ║                                                ║
-║ Текущий класс: {}                    ║
+║ Текущий класс: {}                          ║
+║ Датасет: dataset_{}                             ║
 ╚════════════════════════════════════════════════╝
-        """.format(self.current_class)
+        """.format(self.current_class, self.dataset_number)
         self.get_logger().info(help_text)
+    
+    def find_next_dataset_number(self):
+        """Находит следующий номер датасета"""
+        cwd = os.getcwd()
+        existing_datasets = []
+        
+        for folder in os.listdir(cwd):
+            match = re.match(r'dataset_(\d+)', folder)
+            if match:
+                existing_datasets.append(int(match.group(1)))
+        
+        if not existing_datasets:
+            return 1
+        return max(existing_datasets) + 1
+    
+    def load_existing_dataset(self, dataset_path):
+        """Загружает существующий датасет и восстанавливает состояние"""
+        yaml_path = os.path.join(dataset_path, 'dataset.yaml')
+        
+        # Загружаем классы из yaml
+        if os.path.exists(yaml_path):
+            with open(yaml_path, 'r') as f:
+                config = yaml.safe_load(f)
+                if config and 'names' in config:
+                    # Восстанавливаем маппинг классов
+                    self.class_id_map = {v: k for k, v in config['names'].items()}
+                    self.next_class_id = len(self.class_id_map)
+        
+        # Подсчитываем существующие фото
+        images_dir = os.path.join(dataset_path, 'images')
+        if os.path.exists(images_dir):
+            self.photo_count = len([f for f in os.listdir(images_dir) if f.endswith(('.jpg', '.png'))])
+        
+        self.get_logger().info(f'Загружен датасет: {dataset_path}')
+        self.get_logger().info(f'Классы: {self.class_id_map}')
+        self.get_logger().info(f'Существующих фото: {self.photo_count}')
+    
+    def choose_or_create_dataset(self):
+        """Спрашивает пользователя: дополнить датасет или создать новый"""
+        cwd = os.getcwd()
+        existing_datasets = []
+        
+        # Ищем существующие датасеты
+        for folder in sorted(os.listdir(cwd)):
+            if folder.startswith('dataset_') and os.path.isdir(os.path.join(cwd, folder)):
+                match = re.match(r'dataset_(\d+)', folder)
+                if match:
+                    existing_datasets.append((int(match.group(1)), folder))
+        
+        existing_datasets.sort()
+        
+        print("\n" + "="*60)
+        if existing_datasets:
+            print("Найдены существующие датасеты:")
+            for idx, (num, folder_name) in enumerate(existing_datasets):
+                dataset_path = os.path.join(cwd, folder_name)
+                images_count = len([f for f in os.listdir(os.path.join(dataset_path, 'images')) 
+                                   if os.path.exists(os.path.join(dataset_path, 'images')) 
+                                   and f.endswith(('.jpg', '.png'))])
+                print(f"  {idx + 1}. {folder_name} (фото: {images_count})")
+            
+            choice = input("\nВыберите датасет (номер) или нажмите Enter для создания нового: ").strip()
+            
+            if choice.isdigit() and 1 <= int(choice) <= len(existing_datasets):
+                selected_dataset = existing_datasets[int(choice) - 1]
+                self.dataset_number = selected_dataset[0]
+                self.dataset_dir = os.path.join(cwd, selected_dataset[1])
+                self.load_existing_dataset(self.dataset_dir)
+            else:
+                # Создаем новый датасет
+                self.dataset_number = self.find_next_dataset_number()
+                self.dataset_dir = os.path.join(cwd, f'dataset_{self.dataset_number}')
+                os.makedirs(self.dataset_dir, exist_ok=True)
+                self.get_logger().info(f'Создан новый датасет: dataset_{self.dataset_number}')
+        else:
+            # Нет существующих датасетов, создаем первый
+            self.dataset_number = 1
+            self.dataset_dir = os.path.join(cwd, f'dataset_{self.dataset_number}')
+            os.makedirs(self.dataset_dir, exist_ok=True)
+            self.get_logger().info(f'Создан новый датасет: dataset_{self.dataset_number}')
+        
+        print("="*60 + "\n")
     
     def image_callback(self, msg):
         try:

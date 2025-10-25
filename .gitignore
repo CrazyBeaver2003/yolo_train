@@ -13,3 +13,4 @@ photos/
 runs/
 yolo11n.pt
 *.pt
+dataset_*/
